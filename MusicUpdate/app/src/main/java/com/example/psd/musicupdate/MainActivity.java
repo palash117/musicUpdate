@@ -17,8 +17,10 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.TableLayout;
 import android.widget.TextView;
 
+import com.example.psd.musicupdate.com.example.psd.musicupdate.dao.MUDbHelper;
 import com.google.gson.Gson;
 
 import java.io.BufferedInputStream;
@@ -35,6 +37,10 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 import dto.MusicListResponse;
 import dto.MusicListResponseList;
@@ -47,7 +53,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private TextView tv1;
     private EditText ed1;
     private Button b1;
-    public static String IP = "10.10.10.10";
+    private TableLayout localSongTable;
+    public static String IP = "piboard.hopto.org";
     public static String SERVER_URL_PREFIX = "http://";
     public static String SERVER_URL_SUFFIX = ":8090/messager/webapi/myClass";
     public static String SERVER_URL = "http://"+IP+":8090/messager/webapi/myClass";
@@ -84,13 +91,24 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        init();
+        populateTables();
+       // tv1.setText(new StringBuilder("isExternalStorageReadable ").append(isExternalStorageReadable()).append("isExternalStorageWritable ").append(isExternalStorageWritable()).toString());
+    }
+
+    private void populateTables() {
+
+    }
+
+    private void init() {
+
         sh = this.getSharedPreferences("com.example.UpdateMusic", Context.MODE_PRIVATE);
         b1 = (Button) findViewById(R.id.b1);
         ed1 = (EditText) findViewById(R.id.ed1);
         tv1 = (TextView) findViewById(R.id.tv1);
+        localSongTable = (TableLayout) findViewById(R.id.MAlocalSongTable);
         b1.setOnClickListener(this);
         verifyStoragePermissions(this);
-       // tv1.setText(new StringBuilder("isExternalStorageReadable ").append(isExternalStorageReadable()).append("isExternalStorageWritable ").append(isExternalStorageWritable()).toString());
     }
 
     @Override
@@ -141,6 +159,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         @Override
         protected String doInBackground(String... urlParams) {
             MusicListResponseList newSongs = checkMusicUpdate();
+            MUDbHelper dbHelper = new MUDbHelper(getApplicationContext(),null, null, 0);
             if(newSongs==null){
                 message = "getting null new songs from api";
                 return "error";
@@ -150,11 +169,40 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 message = "getting null list in new songs from api";
                 return "error";
             }
-            for(MusicListResponse song: songList){
-                String fileName = getFileNameById(song.getId());
-                saveFile(fileName,song.getId());
+
+            ArrayList<Map<String,Object>> localValues = dbHelper.getAllLocalEntries();
+            ArrayList<Integer> localValueIds = new ArrayList<>();
+            ArrayList<Integer> remoteValueIds = new ArrayList<>();
+
+            for(Map<String,Object> map: localValues){
+                localValueIds.add((Integer)map.get("PI_ID"));
             }
-            return "ok";
+            for(MusicListResponse song: songList){
+                remoteValueIds.add(song.getId());
+            }
+
+            Map<Integer,String> idVsNames = new HashMap<>();
+
+            ArrayList<Integer> newValueIds = new ArrayList<>(remoteValueIds);
+            newValueIds.removeAll(localValueIds);
+            for(Integer id: newValueIds){
+                String fileName = getFileNameById(id);
+                idVsNames.put(id,fileName);
+                saveFile(fileName,id);
+            }
+            ArrayList<Map<String,Object>> newValuesToAdd = new ArrayList<>();
+            Set<Integer> ids = idVsNames.keySet();
+            StringBuilder sbr = new StringBuilder("new files added: ");
+            for(Integer id: ids){
+                Map<String, Object> map = new HashMap<>();
+                map.put("PI_ID",id);
+                map.put("NAME",idVsNames.get(id));
+                newValuesToAdd.add(map);
+                sbr.append(idVsNames.get(id)).append("; ");
+            }
+            dbHelper.addEntries(newValuesToAdd);
+
+            return sbr.toString();
         }
 
         private void saveFile(String fileName, Integer id) {
@@ -245,7 +293,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         @Override
         protected void onPostExecute(String s) {
-            tv1.setText(message);
+            tv1.setText(s);
             setLastUpdated();
             super.onPostExecute(s);
         }
